@@ -242,11 +242,11 @@
             <div class="border-t border-slate-100 pt-3">
                 <label class="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
                     <i class="fa-solid fa-key text-indigo-500"></i>
-                    Gemini API Key 설정
+                    Gemini API Key 설정 (로컬 브라우저 영구 보존)
                 </label>
-                <input type="password" id="custom-api-key" value="" class="w-full h-11 px-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-mono transition-all" placeholder="비워두면 프리뷰 기본 인증키가 주입됩니다">
+                <input type="password" id="custom-api-key" value="" class="w-full h-11 px-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs font-mono transition-all" placeholder="비워두셔도 가상 preview에서는 자동 동작">
                 <p class="text-[9px] text-slate-400 mt-1 leading-normal">
-                    기본으로 비워두시면 가상 환경의 API 키가 자동으로 주입됩니다. 한도가 발생하거나 개인 키 사용을 원하실 때만 입력해 주세요.
+                    <strong>💡 안내:</strong> 지금 테스트할 때는 빈칸으로 두셔도 실제 AI가 자동 구동됩니다! 깃허브 배포 후에만 본인의 API Key를 넣어 사용하세요.
                 </p>
             </div>
 
@@ -453,6 +453,45 @@
     </div>
 </div>
 
+<!-- Custom Modern Key Registration Prompt Modal (Shown on external domains if no key) -->
+<div id="key-required-modal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-[fadeIn_0.15s_ease-out]">
+    <div class="bg-white rounded-2xl border border-slate-200 w-full max-w-md shadow-2xl p-6 relative">
+        <button onclick="document.getElementById('key-required-modal').classList.add('hidden')" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+        
+        <div class="w-12 h-12 bg-rose-50 border border-rose-100 rounded-full flex items-center justify-center text-rose-500 mb-4 mx-auto">
+            <i class="fa-solid fa-key text-xl"></i>
+        </div>
+        
+        <h3 class="text-base font-bold text-center text-slate-800 mb-2">
+            Gemini API Key 등록이 필요합니다
+        </h3>
+        
+        <p class="text-xs text-slate-500 text-center mb-5 leading-relaxed">
+            GitHub Pages 등 독립 환경에서 실제 AI 대화 서비스를 이용하시려면 구글 AI 스튜디오에서 발급한 개인 API Key(무료)를 입력하셔야 합니다.
+        </p>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-xs font-semibold text-slate-500 mb-1">내 개인 API Key 입력</label>
+                <input type="password" id="modal-api-key-input" placeholder="AIzaSy..." class="w-full h-11 px-3 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 bg-slate-50 font-mono">
+            </div>
+
+            <div class="flex gap-2.5">
+                <a href="https://aistudio.google.com/" target="_blank" class="flex-1 h-11 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1 transition-all border border-slate-200">
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                    무료 API 키 발급하기
+                </a>
+                <button id="save-modal-api-key-btn" class="flex-1 h-11 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1 transition-all shadow-md shadow-indigo-100">
+                    <i class="fa-solid fa-floppy-disk"></i>
+                    키 저장 및 활성화
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <footer class="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-400 mt-auto">
     <div class="max-w-7xl mx-auto px-4">
         <p>© 2026 아산 메카닉스 AI. Powered by Gemini Semantic NLU Engine.</p>
@@ -544,6 +583,11 @@
     const modalPresetTone = document.getElementById('modal-preset-tone');
     const modalPresetVoice = document.getElementById('modal-preset-voice');
     const modalPresetDesc = document.getElementById('modal-preset-desc');
+
+    // Web Speech API / External domain modal variables
+    const keyRequiredModal = document.getElementById('key-required-modal');
+    const modalApiKeyInput = document.getElementById('modal-api-key-input');
+    const saveModalApiKeyBtn = document.getElementById('save-modal-api-key-btn');
 
     // Reusable Custom Toast Notification
     function showToast(message, type = 'success') {
@@ -892,12 +936,62 @@
         return new Blob([buffer], { type: 'audio/wav' });
     }
 
-    // Call Gemini Text generation API with Dynamic Model Selection
+    // [BULL-PROOF SANDBOX ENVIRONMENT DETECTION]
+    // Safely handles sandboxed frame cross-origin limitations (Gemini, Vercel, Stackblitz, etc.)
+    function isSandboxEnvironment() {
+        try {
+            const host = window.location.hostname;
+            const href = window.location.href;
+            
+            // Explicitly deployed production hosting is NOT sandbox
+            if (host.includes("github.io") || host.includes("github.com") || host.includes("vercel.app") || host.includes("netlify.app")) {
+                return false;
+            }
+            
+            // If running in an iframe, cross-origin sandbox of Gemini is present
+            if (window.self !== window.top) {
+                return true;
+            }
+            
+            // Typical sandbox domain matching
+            if (host.includes("googleusercontent.com") || 
+                host.includes("preview") || 
+                host.includes("webcontainer") || 
+                host.includes("stackblitz") ||
+                host.includes("gemini") ||
+                host === "null" ||
+                host === "" ||
+                href.includes("googleusercontent") ||
+                href.includes("null")) {
+                return true;
+            }
+        } catch (e) {
+            // Sandboxed iframe cross-origin access triggers error on window.location / window.top access.
+            // This is a clear indicator that we are running inside Gemini's sandboxed preview mode!
+            return true;
+        }
+        return false;
+    }
+
+    // Call Gemini Text generation API with Intelligent Routing
     async function callGeminiSemanticHybridAPI(userPrompt, instructions, temperatureSetting) {
-        const apiKey = customApiKeyInput.value.trim() || "";
-        
-        // 지능형 모델 기값 분기: 개인 API 키가 있다면 실서비스용 'gemini-2.5-flash'를 호출하고, 없을 땐 샌드박스 가상 환경 프리뷰 모델을 사용해 에러를 원천 예방합니다.
-        const modelName = apiKey ? "gemini-2.5-flash" : "gemini-2.5-flash-preview-09-2025";
+        const isSandbox = isSandboxEnvironment();
+        let apiKey = "";
+        let modelName = "";
+
+        if (isSandbox) {
+            // (1) 가상 Preview 환경에서는 빈 문자열로 쏘면 플랫폼이 정상 키를 주입해서 무료 실시간 AI 대화가 수행됩니다.
+            apiKey = "";
+            modelName = "gemini-2.5-flash-preview-09-2025";
+        } else {
+            // (2) 외부 독립 사이트(GitHub 등)에서는 사용자가 입력한 개별 키로 작동하며, 없을 경우 오류를 던집니다.
+            apiKey = customApiKeyInput.value.trim();
+            if (!apiKey) {
+                throw new Error("API_KEY_REQUIRED_EXTERNAL");
+            }
+            modelName = "gemini-2.5-flash"; 
+        }
+
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
         let hybridMatchingPrompt = "";
@@ -939,18 +1033,36 @@
 
         if (!response.ok) {
             const errData = await response.json();
-            throw new Error(errData.error?.message || 'API 호출 도중 오류가 발생했습니다.');
+            const msg = errData.error?.message || '';
+            if (msg.includes("unregistered callers") || response.status === 403) {
+                throw new Error("API_KEY_REQUIRED_EXTERNAL");
+            }
+            throw new Error(msg || 'API 호출 도중 오류가 발생했습니다.');
         }
 
         const data = await response.json();
         return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     }
 
-    // Call Gemini TTS API with Local Web Speech Fallback for Personal API Key Safety
+    // Call Gemini TTS API with Local Web Speech Fallback
     async function playTextToSpeech(textToSpeak, voiceNameSelected) {
         const filteredText = textToSpeak.replace(/\[SEMANTIC_FAQ_MATCH:\d+\]/gi, '').trim();
         const truncatedText = filteredText.length > 1000 ? filteredText.substring(0, 950) + "..." : filteredText;
-        const apiKey = customApiKeyInput.value.trim() || "";
+        
+        const isSandbox = isSandboxEnvironment();
+        let apiKey = "";
+        let modelName = "gemini-2.5-flash-preview-tts";
+
+        if (isSandbox) {
+            apiKey = "";
+        } else {
+            apiKey = customApiKeyInput.value.trim();
+            if (!apiKey) {
+                // 외부 사이트에서 키가 없다면 즉각 웹 브라우저 내장 TTS로 무정지 우회 재생합니다.
+                playLocalWebSpeechFallback(truncatedText);
+                return;
+            }
+        }
 
         try {
             const promptInstruction = `다음 텍스트를 감정을 듬뿍 담아 생동감 있게 읽어주세요: "${truncatedText}"`;
@@ -967,10 +1079,10 @@
                         }
                     }
                 },
-                model: "gemini-2.5-flash-preview-tts"
+                model: modelName
             };
 
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
             const response = await fetch(apiUrl, {
                 method: 'POST',
@@ -979,7 +1091,7 @@
             });
 
             if (!response.ok) {
-                throw new Error('구글 클라우드 TTS 접근 불가 또는 허가 오류가 발생했습니다.');
+                throw new Error('구글 TTS 호출 제한 또는 차단됨');
             }
 
             const result = await response.json();
@@ -1009,10 +1121,10 @@
                 
                 currentAudio.play();
             } else {
-                throw new Error('유효한 오디오 데이터가 응답에 누락되었습니다.');
+                throw new Error('데이터 구조 오류');
             }
         } catch (error) {
-            console.warn("구글 Gemini TTS API 호출 실패. 로컬 브라우저 한국어 TTS 엔진으로 대체 구동합니다.", error);
+            console.warn("구글 Gemini TTS 실패. 로컬 브라우저 한국어 TTS 엔진으로 우회 재생합니다.", error);
             playLocalWebSpeechFallback(truncatedText);
         }
     }
@@ -1034,6 +1146,57 @@
         } else {
             console.error("현 브라우저는 Web Speech API 음성 합성을 지원하지 않습니다.");
         }
+    }
+
+    // Save key inside modal handler
+    saveModalApiKeyBtn.addEventListener('click', () => {
+        const keyVal = modalApiKeyInput.value.trim();
+        customApiKeyInput.value = keyVal;
+        localStorage.setItem('user_gemini_api_key_v1', keyVal);
+        keyRequiredModal.classList.add('hidden');
+        showToast("Gemini API Key가 안전하게 로컬 저장 및 갱신되었습니다!");
+        updateStatusBadgeAndBanner();
+        updateDeveloperCodes();
+    });
+
+    // Save key in sidebar key input immediately
+    customApiKeyInput.addEventListener('input', (e) => {
+        const keyVal = e.target.value.trim();
+        localStorage.setItem('user_gemini_api_key_v1', keyVal);
+        updateStatusBadgeAndBanner();
+        updateDeveloperCodes();
+    });
+
+    // Update status indicators dynamically based on hosting environment and API keys
+    function updateStatusBadgeAndBanner() {
+        const isSandbox = isSandboxEnvironment();
+        const apiKey = customApiKeyInput.value.trim();
+        const badge = document.getElementById('current-bot-badge');
+        
+        if (isSandbox) {
+            // 가상 preview 가동 상태 (실제 AI 무설정 지원)
+            badge.textContent = "✨ AI 테스트 모드 (무설정)";
+            badge.className = "bg-indigo-100 text-indigo-800 font-bold text-[9px] px-1.5 py-0.5 rounded-full";
+        } else {
+            if (apiKey) {
+                // 외부 사이트 배포 상태 + 사용자가 개인 API Key를 넣은 상태
+                badge.textContent = "🟢 AI 라이브 모드";
+                badge.className = "bg-emerald-100 text-emerald-800 font-bold text-[9px] px-1.5 py-0.5 rounded-full";
+            } else {
+                // 외부 사이트 배포 상태이나 API Key가 공백인 상태
+                badge.textContent = "🔴 API 키 등록 필요";
+                badge.className = "bg-rose-100 text-rose-800 font-bold text-[9px] px-1.5 py-0.5 rounded-full animate-pulse";
+            }
+        }
+    }
+
+    // Load API key from LocalStorage on page startup
+    function loadSavedApiKey() {
+        const savedKey = localStorage.getItem('user_gemini_api_key_v1');
+        if (savedKey) {
+            customApiKeyInput.value = savedKey;
+        }
+        updateStatusBadgeAndBanner();
     }
 
     // Append message element to container
@@ -1135,6 +1298,7 @@
         chatHistory.push({ role: 'bot', text: startMessage });
         appendMessage('bot', startMessage);
 
+        updateStatusBadgeAndBanner();
         updateDeveloperCodes();
     }
 
@@ -1340,7 +1504,7 @@ print(f"답변: {ans} (고정답변 매칭 여부: {is_static})")`;
         showToast("코드가 클립보드에 복사되었습니다!");
     });
 
-    // Handle form submit chat
+    // Handle form submit chat with Smart Error Mitigation Modal
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = chatInput.value.trim();
@@ -1352,7 +1516,7 @@ print(f"답변: {ans} (고정답변 매칭 여부: {is_static})")`;
         chatHistory.push({ role: 'user', text: text });
 
         typingIndicator.classList.remove('hidden');
-        typingStatusText.textContent = `${botNameInput.value}가 문맥을 분석하는 중입니다...`;
+        typingStatusText.textContent = `${botNameInput.value}가 대답을 생각하는 중입니다...`;
 
         try {
             const answer = await callGeminiSemanticHybridAPI(text, systemInstructionsInput.value, botTemperature.value);
@@ -1366,7 +1530,15 @@ print(f"답변: {ans} (고정답변 매칭 여부: {is_static})")`;
             }
         } catch (err) {
             typingIndicator.classList.add('hidden');
-            appendMessage('bot', `⚠️ 오류가 발생했습니다: ${err.message}\n인증 토큰 유효성 혹은 API Throttling이 의심되는 경우 본인만의 Gemini API 키를 설정칸에서 확인해 보십시오.`);
+            
+            if (err.message === "API_KEY_REQUIRED_EXTERNAL") {
+                // 외부 사이트 배포 시에 API Key가 공백이라면 세련된 경고 팝업을 띄워 유도합니다.
+                modalApiKeyInput.value = customApiKeyInput.value;
+                keyRequiredModal.classList.remove('hidden');
+                appendMessage('bot', `⚠️ 작동을 위해 구글 Gemini API Key 등록이 필요합니다.\n\n화면에 팝업된 키 설정창을 이용해 발급받은 무료 API Key를 입력해주시면 즉시 정상 작동합니다.`);
+            } else {
+                appendMessage('bot', `⚠️ 오류가 발생했습니다: ${err.message}\n인증 토큰 유효성 혹은 API Throttling이 의심되는 경우 본인만의 Gemini API 키를 설정칸에서 확인해 보십시오.`);
+            }
         }
     });
 
@@ -1420,6 +1592,7 @@ print(f"답변: {ans} (고정답변 매칭 여부: {is_static})")`;
     // Window Init Start
     window.onload = function () {
         loadSavedPresets();
+        loadSavedApiKey(); 
         loadPreset("choi_master");
     };
 
